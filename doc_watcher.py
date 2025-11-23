@@ -38,7 +38,21 @@ from typing import Dict, List, Tuple
 
 CACHE_DIR = os.path.join(os.path.dirname(__file__), ".cache")
 PREV_STATE_FILE = os.path.join(CACHE_DIR, "prev_paragraphs.json")
-DOCS_DIR = os.path.join(os.path.dirname(__file__), "docs")
+# Allow overriding watched path via env var `DOCS_PATH` or `DOCS_DIR`.
+# If a file path is given (endswith .md), we'll watch its parent directory
+# but only react when that file changes.
+env_path = os.environ.get("DOCS_PATH") or os.environ.get("DOCS_DIR")
+if env_path:
+    env_path = os.path.abspath(env_path)
+    if os.path.isfile(env_path) and env_path.endswith(".md"):
+        WATCHED_FILE = env_path
+        DOCS_DIR = os.path.dirname(env_path)
+    else:
+        WATCHED_FILE = None
+        DOCS_DIR = env_path
+else:
+    WATCHED_FILE = None
+    DOCS_DIR = os.path.join(os.path.dirname(__file__), "docs")
 
 
 def ensure_cache_dir() -> None:
@@ -297,19 +311,26 @@ def start_watchdog(prev_state: Dict[str, List[Tuple[str, str]]]) -> None:
         def on_modified(self, event):
             if event.is_directory:
                 return
-            if event.src_path.endswith('.md'):
-                # small delay to allow write completion
-                time.sleep(0.1)
-                print(f"Detected file system event: modified {event.src_path}")
-                handle_change_event(event.src_path, prev_state)
+            if not event.src_path.endswith('.md'):
+                return
+            # If a single file is being watched, only respond for that file
+            if WATCHED_FILE and os.path.abspath(event.src_path) != os.path.abspath(WATCHED_FILE):
+                return
+            # small delay to allow write completion
+            time.sleep(0.1)
+            print(f"Detected file system event: modified {event.src_path}")
+            handle_change_event(event.src_path, prev_state)
 
         def on_created(self, event):
             if event.is_directory:
                 return
-            if event.src_path.endswith('.md'):
-                time.sleep(0.1)
-                print(f"Detected file system event: created {event.src_path}")
-                handle_change_event(event.src_path, prev_state)
+            if not event.src_path.endswith('.md'):
+                return
+            if WATCHED_FILE and os.path.abspath(event.src_path) != os.path.abspath(WATCHED_FILE):
+                return
+            time.sleep(0.1)
+            print(f"Detected file system event: created {event.src_path}")
+            handle_change_event(event.src_path, prev_state)
 
     # choose polling observer when on /mnt/ (WSL mounted drives) or when env forces polling
     use_polling = os.environ.get("USE_POLLING", "").lower() in ("1", "true", "yes") or DOCS_DIR.startswith("/mnt/")
@@ -328,7 +349,8 @@ def start_watchdog(prev_state: Dict[str, List[Tuple[str, str]]]) -> None:
 
     observer.schedule(Handler(), DOCS_DIR, recursive=False)
     observer.start()
-    print(f"Watching {DOCS_DIR} for changes (fallback mode, observer={observer_type})")
+    watched_desc = WATCHED_FILE if WATCHED_FILE else DOCS_DIR
+    print(f"Watching {watched_desc} for changes (fallback mode, observer={observer_type})")
     try:
         while True:
             time.sleep(1)
