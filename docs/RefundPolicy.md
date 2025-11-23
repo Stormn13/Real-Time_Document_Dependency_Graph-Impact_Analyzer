@@ -5,7 +5,7 @@ POLICY_ID: REFUND_POLICY
 This is the official refund policy for customer purchases.
 
 ## Refund Period  
-Customers may request a refund within **14 days** of purchase.  
+Customers may request a refund within **7 days** of purchase.  
 [REF: REFUND_POLICY]
 
 ## Eligible Products  
