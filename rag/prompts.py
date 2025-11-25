@@ -10,38 +10,29 @@ def build_prompt(
     Construct the final prompt given to the LLM.
     This prompt must force strict JSON output.
     """
-    prompt = f"""
-A policy document has been updated.
+    # Format snippets and docs more safely
+    old_text = "\n".join(f"- {s[:200]}" for s in old_snippets[:3]) if old_snippets else "(none)"
+    new_text = "\n".join(f"- {s[:200]}" for s in new_snippets[:3]) if new_snippets else "(none)"
+    docs_text = "\n".join(f"- {doc}: {len(snippets)} snippet(s)" for doc, snippets in impacted_docs.items()) if impacted_docs else "(none)"
+    
+    prompt = f"""You are a documentation analyst. A policy has changed.
 
-Summary of the change:
-{changed_summary}
+Changed policy summary: {changed_summary}
 
-Old policy snippets:
-{old_snippets}
+Old text (preview):
+{old_text}
 
-New policy snippets:
-{new_snippets}
+New text (preview):
+{new_text}
 
-Impacted documents and their excerpts:
-{impacted_docs}
+Documents that may be affected:
+{docs_text}
 
-Your job:
-1. Identify inconsistencies between the NEW policy text and each impacted document.
-2. Suggest a corrected rewrite for each document.
-3. Output ONLY strict JSON using this schema:
-
+Task: Return JSON with this schema (only JSON, no extra text):
 {{
-  "summary": "one line summary",
-  "severity": "low" | "medium" | "high",
-  "impacted_docs": [
-    {{
-      "doc_id": "string",
-      "inconsistent_snippets": ["..."],
-      "suggested_rewrite": "..."
-    }}
-  ]
+  "summary": "brief summary of the change impact",
+  "severity": "low",
+  "impacted_docs": ["list", "of", "doc", "names"]
 }}
-
-Do NOT output anything except valid JSON.
 """
     return prompt

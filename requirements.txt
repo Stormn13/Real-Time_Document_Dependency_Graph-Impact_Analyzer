@@ -1,5 +1,5 @@
 watchdog
 python-dotenv
-google-generative-ai
+google-generativeai
 sentence-transformers
 numpy

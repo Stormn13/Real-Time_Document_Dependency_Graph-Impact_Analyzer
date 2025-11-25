@@ -26,6 +26,13 @@ def extract_json(text: str) -> dict:
     Extract JSON from Gemini output safely.
     Handles markdown, extra text, etc.
     """
+    if not text or len(text.strip()) == 0:
+        return {
+            "summary": "Empty response from Gemini",
+            "severity": "low",
+            "impacted_docs": []
+        }
+    
     try:
         # Direct JSON? Try loading directly.
         return json.loads(text)
@@ -42,8 +49,8 @@ def extract_json(text: str) -> dict:
 
     # If extraction fails, return fallback
     return {
-        "summary": "JSON parse failed",
-        "severity": "medium",
+        "summary": "Could not parse LLM response as JSON",
+        "severity": "low",
         "impacted_docs": []
     }
 
@@ -75,6 +82,23 @@ def run_llm(changed_event: Dict[str, Any]) -> Dict[str, Any]:
                 "max_output_tokens": 2048,
             },
         )
+
+        # Check if response has valid content (check candidates)
+        if not response.candidates or len(response.candidates) == 0:
+            return {
+                "summary": "Gemini blocked response (no valid candidates)",
+                "severity": "low",
+                "impacted_docs": []
+            }
+
+        # Check finish reason of first candidate
+        candidate = response.candidates[0]
+        if hasattr(candidate, "finish_reason") and candidate.finish_reason and candidate.finish_reason.name != "STOP":
+            return {
+                "summary": f"Gemini blocked response (reason: {candidate.finish_reason.name})",
+                "severity": "low",
+                "impacted_docs": []
+            }
 
         raw_text = response.text.strip()
 
