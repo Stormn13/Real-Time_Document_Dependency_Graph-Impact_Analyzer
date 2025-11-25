@@ -1,0 +1,5 @@
+watchdog
+python-dotenv
+google-generative-ai
+sentence-transformers
+numpy

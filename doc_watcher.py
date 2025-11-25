@@ -108,6 +108,7 @@ def build_dependencies(docs_dir: str) -> List[Dict]:
     # build a lightweight keyword index from filenames (without extension)
     name_keywords = {fn: set(re.findall(r"\w+", os.path.splitext(fn)[0].lower())) for fn in files}
 
+    # Use explicit filename mentions first
     for fn in files:
         text = read_doc(os.path.join(docs_dir, fn))
         lowered = text.lower()
@@ -122,11 +123,14 @@ def build_dependencies(docs_dir: str) -> List[Dict]:
                     "ref_type": "explicit",
                     "confidence": 0.95,
                 })
-        # implicit keyword matches (cheap signal)
+
+    # Cheap implicit keyword matches
+    for fn in files:
+        text = read_doc(os.path.join(docs_dir, fn))
+        lowered = text.lower()
         for candidate, keys in name_keywords.items():
             if candidate == fn:
                 continue
-            # if many keywords from candidate appear in the document, count as implicit
             match_count = sum(1 for k in keys if k and k in lowered)
             if match_count >= max(1, len(keys) // 2):
                 deps.append({
@@ -135,6 +139,34 @@ def build_dependencies(docs_dir: str) -> List[Dict]:
                     "ref_type": "implicit",
                     "confidence": 0.6 + 0.05 * match_count,
                 })
+
+    # Try to strengthen implicit links using a paragraph embedding index if available
+    try:
+        from rag.doc_index import DocIndex
+
+        idx = DocIndex(docs_dir)
+        # For each document, query the index with its full text to find top matching paragraphs from other docs
+        for fn in files:
+            path = os.path.join(docs_dir, fn)
+            text = read_doc(path)
+            results = idx.query(text, top_k=10)
+            seen = set()
+            for score, meta in results:
+                to_doc = meta.get("doc")
+                if to_doc == fn:
+                    continue
+                # threshold for implicit semantic link
+                if score >= 0.70 and (fn, to_doc) not in seen:
+                    deps.append({
+                        "from_doc": fn,
+                        "to_doc": to_doc,
+                        "ref_type": "semantic",
+                        "confidence": float(score),
+                    })
+                    seen.add((fn, to_doc))
+    except Exception:
+        # sentence-transformers not available or indexing failed; continue
+        pass
 
     # de-duplicate keeping highest confidence per pair
     best = {}
@@ -277,9 +309,13 @@ def handle_change_event(path: str, prev_state: Dict[str, List[Tuple[str, str]]])
             try:
                 from rag.llm_runner import run_llm
 
-                _ = run_llm(changed)
+                llm_result = run_llm(changed)
+                # print LLM output as JSON for downstream systems
+                print("LLM result:", json.dumps(llm_result, ensure_ascii=False))
             except Exception:
-                pass
+                import traceback
+
+                traceback.print_exc()
     except Exception:
         import traceback
 
