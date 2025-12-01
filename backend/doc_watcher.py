@@ -131,13 +131,27 @@ def build_dependencies(docs_dir: str) -> List[Dict]:
         for candidate, keys in name_keywords.items():
             if candidate == fn:
                 continue
+            
+            # IMPROVED: Check for exact filename match in text (without extension)
+            # e.g. "refund_policy_v2" in text
+            candidate_base = os.path.splitext(candidate)[0]
+            if candidate_base in lowered:
+                 deps.append({
+                    "from_doc": fn,
+                    "to_doc": candidate,
+                    "ref_type": "explicit_base",
+                    "confidence": 0.9,
+                })
+                 continue
+
             match_count = sum(1 for k in keys if k and k in lowered)
-            if match_count >= max(1, len(keys) // 2):
+            # Lower threshold: if > 30% of keywords match
+            if len(keys) > 0 and match_count >= max(1, len(keys) // 3):
                 deps.append({
                     "from_doc": fn,
                     "to_doc": candidate,
                     "ref_type": "implicit",
-                    "confidence": 0.6 + 0.05 * match_count,
+                    "confidence": 0.5 + 0.1 * match_count,
                 })
 
     # Try to strengthen implicit links using a paragraph embedding index if available
@@ -278,9 +292,12 @@ def resolve_impacts(changed_event: Dict, dependencies: List[Dict], docs_dir: str
     return changed_event
 
 
-def emit_event(event: Dict) -> None:
+def emit_event(event: Dict, on_event=None) -> None:
     # Canonical JSON output on stdout (one per line). Downstream systems can read this stream.
-    print(json.dumps(event, ensure_ascii=False))
+    json_str = json.dumps(event, ensure_ascii=False)
+    print(json_str)
+    if on_event:
+        on_event(event)
 
 
 def scan_all_docs_and_update(prev_state: Dict[str, List[Tuple[str, str]]]) -> None:
@@ -294,7 +311,7 @@ def scan_all_docs_and_update(prev_state: Dict[str, List[Tuple[str, str]]]) -> No
         prev_state[fn] = [(p, md5_text(p)) for p in pars]
 
 
-def handle_change_event(path: str, prev_state: Dict[str, List[Tuple[str, str]]]) -> None:
+def handle_change_event(path: str, prev_state: Dict[str, List[Tuple[str, str]]], on_event=None) -> None:
     # Detect changes for the single file, assemble impacts, and emit JSON
     try:
         changed = detect_changes(path, prev_state)
@@ -302,7 +319,7 @@ def handle_change_event(path: str, prev_state: Dict[str, List[Tuple[str, str]]])
             return
         deps = build_dependencies(DOCS_DIR)
         changed = resolve_impacts(changed, deps, DOCS_DIR)
-        emit_event(changed)
+        emit_event(changed, on_event)
         save_prev_state(prev_state)
         # optional: call LLM runner if available and desired
         if os.environ.get("RUN_LLM", "false").lower() in ("1", "true", "yes"):
@@ -323,7 +340,7 @@ def handle_change_event(path: str, prev_state: Dict[str, List[Tuple[str, str]]])
 
 
 # --- Watcher fallback (watchdog) -------------------------------------------------
-def start_watchdog(prev_state: Dict[str, List[Tuple[str, str]]]) -> None:
+def start_watchdog(prev_state: Dict[str, List[Tuple[str, str]]], on_event=None) -> None:
     try:
         from watchdog.events import FileSystemEventHandler
         # prefer native Observer but fall back to PollingObserver on mounts like /mnt/
@@ -355,7 +372,7 @@ def start_watchdog(prev_state: Dict[str, List[Tuple[str, str]]]) -> None:
             # small delay to allow write completion
             time.sleep(0.1)
             print(f"Detected file system event: modified {event.src_path}")
-            handle_change_event(event.src_path, prev_state)
+            handle_change_event(event.src_path, prev_state, on_event)
 
         def on_created(self, event):
             if event.is_directory:
@@ -366,7 +383,7 @@ def start_watchdog(prev_state: Dict[str, List[Tuple[str, str]]]) -> None:
                 return
             time.sleep(0.1)
             print(f"Detected file system event: created {event.src_path}")
-            handle_change_event(event.src_path, prev_state)
+            handle_change_event(event.src_path, prev_state, on_event)
 
     # choose polling observer when on /mnt/ (WSL mounted drives) or when env forces polling
     use_polling = os.environ.get("USE_POLLING", "").lower() in ("1", "true", "yes") or DOCS_DIR.startswith("/mnt/")

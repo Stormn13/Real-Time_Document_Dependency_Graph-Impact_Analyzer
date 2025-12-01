@@ -3,3 +3,7 @@ python-dotenv
 google-generativeai
 sentence-transformers
 numpy
+
+fastapi
+uvicorn
+websockets

@@ -1,0 +1,1 @@
+product warranty depends on the type of productor customer is buying, warranty is listed on all the products
